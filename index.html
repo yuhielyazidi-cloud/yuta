@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Yuta</title>
+<style>
+  :root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  html, body { height: 100%; margin: 0; background: #000; color: #fff; font-family: Georgia, "Times New Roman", serif; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; text-align: center; }
+  #quiz h1 { font-weight: normal; font-size: clamp(1.6rem, 6vw, 2.8rem); margin: 0 0 2rem; }
+  .btns { display: flex; gap: 1.5rem; justify-content: center; }
+  button { background: #000; color: #fff; border: 1px solid #fff; padding: .7rem 2.2rem; font: inherit; font-size: 1.2rem; cursor: pointer; transition: background .2s, color .2s; }
+  button:hover { background: #fff; color: #000; }
+  #msg { margin-top: 1.5rem; font-size: 1.3rem; min-height: 1.6em; }
+  canvas { display: none; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+  <div id="quiz">
+    <h1>Do you love Yuta?</h1>
+    <div class="btns"><button id="yes">Yes</button><button id="no">No</button></div>
+    <div id="msg"></div>
+  </div>
+  <canvas id="c"></canvas>
+
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const TEXT = 'Yuta'; let particles = [];
+let layers = [], W, H, DPR, FS, started = false, t0 = 0, total = 0;
+
+function build() {
+  DPR = window.devicePixelRatio || 1;
+  W = cv.width = innerWidth * DPR; H = cv.height = innerHeight * DPR;
+  const S = Math.min(W, H) * 0.8 / 34;          // pixels per heart unit
+  FS = Math.max(12 * DPR, Math.min(W, H) / 32);  // bigger text
+  ctx.font = FS + 'px Georgia, serif';
+  const step = ctx.measureText(TEXT).width * 0.4; // words side by side, tight
+  // sample the heart curve
+  const pts = [], M = 3000; let len = [0];
+  for (let k = 0; k <= M; k++) {
+    const t = k / M * 2 * Math.PI;
+    const x = 16 * Math.pow(Math.sin(t), 3);
+    const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+    pts.push({ x: x * S, y: -(y + 2.5) * S });
+    if (k) len.push(len[k - 1] + Math.hypot(pts[k].x - pts[k-1].x, pts[k].y - pts[k-1].y));
+  }
+  const chars = []; let k = 0, j = 0;
+  for (let s = 0; s < len[M]; s += step, j++) {
+    while (k < M - 1 && len[k + 1] < s) k++;
+    const a = pts[k], b = pts[k + 1];
+    chars.push({ x: a.x, y: a.y, ang: Math.atan2(b.y - a.y, b.x - a.x), ch: TEXT });
+  }
+  const R = 16 * S, zs = [0];
+  layers = zs.map(z => ({ z, chars }));
+  total = chars.length;
+  particles = Array.from({ length: 110 }, () => ({
+    x: Math.random() * W, y: Math.random() * H,
+    r: (0.8 + Math.random() * 2) * DPR, v: (0.15 + Math.random() * 0.5) * DPR,
+    w: 0.5 + Math.random() * 1.5, ph: Math.random() * 6.28
+  }));
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!started) return;
+  const el = (now - t0) / 1000;
+  const rf = Math.min(total, el * total / 10);   // 6 s to draw the heart
+  const revealed = Math.ceil(rf);
+  const a = 0;                                 // fixed tilt, no movement
+  const ca = Math.cos(a), sa = Math.sin(a), F = Math.min(W, H) * 2.2;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  // soft glow behind the heart, grows as the heart is drawn
+  const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.min(W, H) * 0.55);
+  g.addColorStop(0, 'rgba(255,255,255,' + (0.14 * rf / total) + ')');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // floating particles, more and more as the animation goes on
+  ctx.shadowColor = 'rgba(255,255,255,0.9)'; ctx.shadowBlur = 8 * DPR;
+  const vis = Math.floor(particles.length * rf / total);
+  for (let n = 0; n < vis; n++) {
+    const q = particles[n];
+    q.y -= q.v; q.x += Math.sin(el * q.w + q.ph) * 0.25 * DPR;
+    if (q.y < -10) q.y = H + 10;
+    ctx.globalAlpha = 0.25 + 0.55 * Math.abs(Math.sin(el * q.w * 2 + q.ph));
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, 6.2832); ctx.fill();
+  }
+  ctx.font = FS + 'px Georgia, serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(255,255,255,0.85)'; ctx.shadowBlur = FS * 0.7;
+  for (const L of layers) {
+    for (let i = 0; i < revealed; i++) {
+      const c = L.chars[i];
+      const x3 = c.x * ca + L.z * sa, z3 = -c.x * sa + L.z * ca;
+      const p = F / (F - z3);
+      const fade = Math.max(0, Math.min(1, (rf - i) / 3));
+      ctx.globalAlpha = fade * Math.min(1, 0.45 + 0.35 * p);
+      ctx.save();
+      ctx.translate(W / 2 + x3 * p, H / 2 + c.y * p);
+      ctx.scale(p, p);
+      ctx.fillStyle = '#e6e6e6';
+      ctx.fillText(c.ch, 0, 0);
+      ctx.restore();
+    }
+  }
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+}
+
+document.getElementById('yes').onclick = () => {
+  document.getElementById('quiz').style.display = 'none';
+  cv.style.display = 'block'; build(); started = true; t0 = performance.now();
+};
+document.getElementById('no').onclick = () => { document.getElementById('msg').textContent = 'Wrong answer'; };
+addEventListener('resize', () => { if (started) build(); });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
